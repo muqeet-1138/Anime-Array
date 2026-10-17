@@ -95,24 +95,15 @@ header.site .bar {
   font-weight: 800; letter-spacing: -.02em; text-decoration: none;
   color: var(--ink); font-size: 1.05rem;
 }
-/* The real logo mark. The artwork carries its own circular shape and white
-   fill, so no background or rounding is applied here - doing either would
-   crop or box it. The logo is already sized generously enough that the white
-   circle merges into the white header rather than floating on it. */
+/* The real logo mark. The artwork supplies its own circular plate and its
+   speed lines extend beyond that circle, so nothing here may round, crop or
+   pad the image: a border-radius clips the speed lines off and the mark looks
+   broken. Dark mode needs no special case either, because the logo's own white
+   plate already separates it from the inverted header. */
 .brand .mark {
   width: 32px; height: 32px;
   flex: 0 0 auto;
   display: block;
-}
-
-/* On dark surfaces the logo's white disc would glare. A subtle dark plate
-   keeps the disc from blowing out against the inverted header. */
-@media (prefers-color-scheme: dark) {
-  .brand .mark {
-    background: var(--paper-2);
-    border-radius: 50%;
-    padding: 1px;
-  }
 }
 
 nav.site { margin-left: auto; display: flex; gap: .25rem; flex-wrap: wrap; }
