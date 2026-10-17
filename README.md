@@ -165,13 +165,14 @@ Available at **[otaku.animearray.site](https://otaku.animearray.site/)**.
 
 A recommendation engine that works from what you actually watched rather than what is popular.
 
-You provide recent history, your favourites and the titles you dropped. AniPick weighs that specific track record and proposes the next logical step, instead of returning a generic top ten that is identical for every visitor. It is deliberately built to be useful within one sitting, before any pattern of behaviour has accumulated.
+You provide recent history, your favourites and the titles you dropped. AniPick weighs that specific track record and proposes the next logical step, instead of returning a generic top ten that is identical for every visitor. It is built to be useful within one sitting, before any pattern of behaviour has accumulated.
 
 Available at **[animearray.site/anipick](https://animearray.site/anipick/)**.
 
 ### Vision AI
 
 An anime image generator for character art, wallpapers and creative work. It sits alongside the conversational tools so that the same platform covers both talking about anime and making it.
+It is scheduled to be published when Anime Array reaches 10,000 monthly users.
 
 Available at **[animearray.site/vision-ai](https://animearray.site/vision-ai/)**.
 
