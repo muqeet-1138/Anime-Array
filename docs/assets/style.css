@@ -99,9 +99,14 @@ header.site .bar {
    speed lines extend beyond that circle, so nothing here may round, crop or
    pad the image: a border-radius clips the speed lines off and the mark looks
    broken. Dark mode needs no special case either, because the logo's own white
-   plate already separates it from the inverted header. */
+   plate already separates it from the inverted header.
+
+   38px rather than 32px. The artwork is 995x1139, so fitting it to a square
+   leaves the mark at roughly 85% of the box width even before any margin. At
+   32px that left the circle barely 20px across and the lettering unreadable.
+   Nothing here may make this smaller without the mark ceasing to be legible. */
 .brand .mark {
-  width: 32px; height: 32px;
+  width: 38px; height: 38px;
   flex: 0 0 auto;
   display: block;
 }

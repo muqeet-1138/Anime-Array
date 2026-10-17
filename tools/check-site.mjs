@@ -347,11 +347,14 @@ console.log(`  no orphaned pages among ${pages.length} indexable pages`);
 // Brand assets. These are referenced from every page, so a missing file is a
 // broken header or a missing favicon on the whole site.
 const REQUIRED_ASSETS = [
-    ['logo-128.png', 'the header mark'],
+    ['logo-64.png', 'the header mark at 1x'],
+    ['logo-192.png', 'the header mark at 2x'],
+    ['logo-128.png', 'a general logo size'],
     ['logo-256.png', 'the reference-sized logo'],
     ['logo.png', 'the full logo'],
     ['favicon-16.png', '16px favicon'],
     ['favicon-32.png', '32px favicon'],
+    ['favicon-48.png', '48px favicon'],
     ['favicon.ico', 'multi-size favicon'],
     ['apple-touch-icon.png', 'iOS home-screen icon']
 ];
