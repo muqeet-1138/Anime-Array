@@ -95,20 +95,27 @@ header.site .bar {
   font-weight: 800; letter-spacing: -.02em; text-decoration: none;
   color: var(--ink); font-size: 1.05rem;
 }
-/* The real logo mark. The artwork supplies its own circular plate and its
-   speed lines extend beyond that circle, so nothing here may round, crop or
-   pad the image: a border-radius clips the speed lines off and the mark looks
-   broken. Dark mode needs no special case either, because the logo's own white
-   plate already separates it from the inverted header.
+/* The Anime Array logo, used exactly as supplied.
 
-   38px rather than 32px. The artwork is 995x1139, so fitting it to a square
-   leaves the mark at roughly 85% of the box width even before any margin. At
-   32px that left the circle barely 20px across and the lettering unreadable.
-   Nothing here may make this smaller without the mark ceasing to be legible. */
+   The owner uploaded a 1600x1600 master in which the artwork fills 84% of the
+   width and 90% of the height, centred at 52% across and 46% down. The full
+   canvas is kept: nothing is cropped, re-centred, rounded or recoloured.
+
+   Only the opaque white surrounding the artwork is made transparent, so the
+   mark composites cleanly on the dark header instead of sitting in a white
+   box. The white plate inside the black circle outline is part of the artwork
+   and is preserved.
+
+   48px: with the artwork at 84% of the canvas that leaves roughly 40px of
+   visible mark. The offsets are layout only - they line the artwork up with
+   the wordmark and alter no pixel of the image. */
 .brand .mark {
-  width: 38px; height: 38px;
+  width: 48px; height: 48px;
   flex: 0 0 auto;
   display: block;
+  position: relative;
+  left: -1px;
+  top: 2px;
 }
 
 nav.site { margin-left: auto; display: flex; gap: .25rem; flex-wrap: wrap; }
