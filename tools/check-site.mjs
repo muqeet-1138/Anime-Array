@@ -176,9 +176,16 @@ function checkPage(file) {
   return { file, words, title: title.length, desc: desc.length, jsonld: blocks.length, problems, floor };
 }
 
-const files = fs.existsSync(DOCS)
-  ? fs.readdirSync(DOCS).filter((f) => f.endsWith('.html')).sort()
-  : [];
+// Search Console and similar verification stubs live in docs/ because they must
+// be served from the site root to work. They are not pages: one line of text,
+// no doctype, no head. Checking them as pages would report dozens of failures
+// that say nothing about the site.
+const isVerificationStub = (f) => /^google[0-9a-f]+\.html$/i.test(f) ||
+                                 /^[a-z0-9-]*verification[a-z0-9-]*\.html$/i.test(f);
+
+const allHtml = fs.existsSync(DOCS) ? fs.readdirSync(DOCS).filter((f) => f.endsWith('.html')) : [];
+const stubs = allHtml.filter(isVerificationStub);
+const files = allHtml.filter((f) => !isVerificationStub(f)).sort();
 
 if (!files.length) {
   console.error('No HTML found in docs/. Nothing to check.');
@@ -187,6 +194,9 @@ if (!files.length) {
 
 let failed = 0;
 console.log(`Checking ${files.length} page(s) in docs/\n`);
+if (stubs.length) {
+  console.log(`Skipping ${stubs.length} verification stub(s): ${stubs.join(', ')}\n`);
+}
 
 for (const file of files) {
   const r = checkPage(file);
