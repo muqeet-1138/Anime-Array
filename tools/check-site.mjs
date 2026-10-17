@@ -352,9 +352,11 @@ const REQUIRED_ASSETS = [
     ['logo-128.png', 'a general logo size'],
     ['logo-256.png', 'the reference-sized logo'],
     ['logo.png', 'the full logo'],
+    ['favicon-mark.png', 'the ring-cropped favicon master'],
     ['favicon-16.png', '16px favicon'],
     ['favicon-32.png', '32px favicon'],
-    ['favicon-48.png', '48px favicon'],
+    ['favicon-48.png', '48px favicon, the one high-density displays use'],
+    ['favicon-64.png', '64px favicon'],
     ['favicon.ico', 'multi-size favicon'],
     ['apple-touch-icon.png', 'iOS home-screen icon']
 ];
@@ -364,14 +366,22 @@ for (const [file, why] of REQUIRED_ASSETS) {
     else if (fs.statSync(p).size === 0) { console.log(`  - docs/assets/${file} is zero bytes (${why})`); failed++; }
 }
 
-// Every page must reference the same logo and the same four icon files.
-const ICON_FILES = ['favicon.ico', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png'];
+// Every page must reference the same logo and the same icon files.
+const ICON_FILES = ['favicon.ico', 'favicon-48.png', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png'];
 for (const file of files) {
     const html = fs.readFileSync(path.join(DOCS, file), 'utf8');
     const marks = (html.match(/<img[^>]+class="mark"/g) || []).length;
     if (marks !== 1) { console.log(`  - ${file} has ${marks} header marks, expected 1`); failed++; }
     for (const icon of ICON_FILES) {
         if (!html.includes(`assets/${icon}`)) { console.log(`  - ${file} does not link ${icon}`); failed++; }
+    }
+    // sizes="any" belongs to vector icons. On a bitmap .ico it lets the browser
+    // scale from the smallest entry, which is the blurriest one.
+    if (/rel="icon"[^>]*sizes="any"/.test(html)) {
+        console.log(`  - ${file} uses sizes="any" on a bitmap icon`); failed++;
+    }
+    for (const s of ['48x48', '32x32', '16x16']) {
+        if (!html.includes(`sizes="${s}"`)) { console.log(`  - ${file} does not declare a ${s} icon`); failed++; }
     }
 }
 console.log(`  ${REQUIRED_ASSETS.length} brand asset(s) present; logo and icons linked on all ${files.length} pages`);
