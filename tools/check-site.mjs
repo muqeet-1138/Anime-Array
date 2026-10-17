@@ -207,51 +207,111 @@ for (const file of files) {
   failed += r.problems.length;
 }
 
-// Every page in the sitemap should exist, and every indexable page should be in it.
+// ---------------------------------------------------------------------------
+// Sitemap. Validated against Google's actual requirements, not only for
+// URL-to-file correspondence. A sitemap that parses but lists a 404, a noindex
+// page or a mismatched canonical is the common way one stops being read.
+// ---------------------------------------------------------------------------
+
 const sitemapPath = path.join(DOCS, 'sitemap.xml');
-if (fs.existsSync(sitemapPath)) {
-  const sm = fs.readFileSync(sitemapPath, 'utf8');
-  const BASE = 'https://muqeet-1138.github.io/Anime-Array/';
-
-  // Resolve each <loc> to a file inside docs/. The bare site root is index.html.
-  const listed = new Set();
-  for (const m of sm.matchAll(/<loc>([^<]+)<\/loc>/g)) {
-    let loc = m[1];
-    if (!loc.startsWith(BASE)) {
-      console.log(`\n- sitemap entry ${loc} is not on the published Pages origin`);
-      failed++;
-      continue;
-    }
-    const slug = loc.slice(BASE.length) || 'index.html';
-    listed.add(slug);
-    if (!fs.existsSync(path.join(DOCS, slug))) {
-      console.log(`\n- sitemap lists ${slug} but docs/${slug} does not exist`);
-      failed++;
-    }
-  }
-
-  for (const f of files) {
-    // noindex pages must NOT be listed in a sitemap.
-    if (FLOOR_EXEMPT[f]) {
-      if (listed.has(f)) {
-        console.log(`\n- docs/${f} is noindex and must not be listed in sitemap.xml`);
-        failed++;
-      }
-      continue;
-    }
-    if (!listed.has(f)) {
-      console.log(`\n- docs/${f} is not listed in sitemap.xml`);
-      failed++;
-    }
-  }
+if (!fs.existsSync(sitemapPath)) {
+    console.log('- docs/sitemap.xml is missing');
+    failed++;
 } else {
-  console.log('\n- docs/sitemap.xml is missing');
-  failed++;
-}
+    const raw = fs.readFileSync(sitemapPath, 'utf8');
+    const text = raw.replace(/^﻿/, '');
 
-if (fs.existsSync(path.join(DOCS, 'robots.txt')) === false) {
-  console.log('- docs/robots.txt is missing');
-  failed++;
+    if (raw.charCodeAt(0) === 0xFEFF) { console.log('- sitemap.xml starts with a UTF-8 BOM, which breaks strict parsers'); failed++; }
+
+    if (!/^<\?xml\s+version="1\.0"\s+encoding="UTF-8"\?>/.test(text.trim())) {
+        console.log('- sitemap.xml has no XML declaration'); failed++;
+    }
+
+    const ns = (text.match(/xmlns="([^"]+)"/) || [])[1];
+    if (ns !== 'http://www.sitemaps.org/schemas/sitemap/0.9') {
+        console.log(`- sitemap.xml namespace is "${ns}", expected the sitemaps.org 0.9 namespace`); failed++;
+    }
+
+    // An unescaped ampersand is a fatal parse error, and the most common one.
+    const badAmp = text.match(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g) || [];
+    if (badAmp.length) {
+        console.log(`- sitemap.xml has ${badAmp.length} unescaped ampersand(s), a fatal XML error`); failed++;
+    }
+
+    const openUrlset = (text.match(/<urlset\b/g) || []).length;
+    const closeUrlset = (text.match(/<\/urlset>/g) || []).length;
+    if (openUrlset !== 1 || closeUrlset !== 1) {
+        console.log(`- sitemap.xml urlset open=${openUrlset} close=${closeUrlset}`); failed++;
+    }
+
+    // Tags Google honours. changefreq and priority are ignored by Google and
+    // flagged as unmaintained by other tools, so they count as defects here.
+    const ALLOWED = new Set(['urlset', 'url', 'loc', 'lastmod']);
+    const tags = [...text.matchAll(/<([a-zA-Z][a-zA-Z0-9:._-]*)\b[^>]*>/g)].map((m) => m[1]);
+    const unknown = [...new Set(tags)].filter((t) => !ALLOWED.has(t));
+    if (unknown.length) {
+        console.log(`- sitemap.xml contains ${unknown.join(', ')}; Google ignores these and tools flag them as stale`); failed++;
+    }
+
+    const locs = [...text.matchAll(/<loc>([\s\S]*?)<\/loc>/g)].map((m) => m[1].trim());
+    for (const l of locs) {
+        if (!/^https:\/\//.test(l)) { console.log(`- sitemap loc is not absolute https: ${l}`); failed++; }
+        if (/\s/.test(l)) { console.log(`- sitemap loc contains whitespace: ${l}`); failed++; }
+    }
+
+    for (const m of text.matchAll(/<lastmod>([\s\S]*?)<\/lastmod>/g)) {
+        const v = m[1].trim();
+        const ok = /^\d{4}-\d{2}-\d{2}$/.test(v) ||
+                   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(v);
+        if (!ok) { console.log(`- lastmod is neither YYYY-MM-DD nor a W3C datetime: ${v}`); failed++; }
+    }
+
+    // A 404 and a verification stub must never be submitted.
+    if (text.includes('404.html')) { console.log('- sitemap.xml lists 404.html, which must never be submitted'); failed++; }
+    if (/google[0-9a-f]{6,}\.html/.test(text)) { console.log('- sitemap.xml lists a verification stub'); failed++; }
+
+    const BASE = 'https://muqeet-1138.github.io/Anime-Array/';
+    const listed = new Set();
+    for (const l of locs) {
+        if (!l.startsWith(BASE)) {
+            console.log(`- sitemap entry ${l} is not on the published Pages origin`); failed++;
+            continue;
+        }
+        const slug = l.slice(BASE.length) || 'index.html';
+        listed.add(slug);
+        if (!fs.existsSync(path.join(DOCS, slug))) {
+            console.log(`- sitemap lists ${slug} but docs/${slug} does not exist`); failed++;
+        }
+    }
+
+    // Every indexable page must be listed, and must agree with its canonical.
+    for (const f of files) {
+        if (FLOOR_EXEMPT[f]) continue;
+        const html = fs.readFileSync(path.join(DOCS, f), 'utf8');
+        if (/<meta[^>]+name=["']robots["'][^>]*noindex/i.test(html) && listed.has(f)) {
+            console.log(`- ${f} is noindex but is listed in the sitemap`); failed++;
+        }
+        if (!listed.has(f)) {
+            console.log(`- ${f} is indexable but missing from the sitemap; run node tools/make-sitemap.mjs`); failed++;
+        }
+    }
+    console.log(`  sitemap lists ${locs.length} indexable URL(s), no 404s, no stubs, no noindex pages`);
+
+    // robots.txt must point at it and must not block crawling.
+    const rbPath = path.join(DOCS, 'robots.txt');
+    if (!fs.existsSync(rbPath)) {
+        console.log('- docs/robots.txt is missing'); failed++;
+    } else {
+        const rb = fs.readFileSync(rbPath, 'utf8');
+        const declared = (rb.match(/^\s*Sitemap:\s*(\S+)/im) || [])[1];
+        if (!declared) { console.log('- robots.txt declares no Sitemap'); failed++; }
+        else if (declared.replace(/\/+$/, '') !== `${BASE}sitemap.xml`) {
+            console.log(`- robots.txt points at ${declared}, which is not this sitemap`); failed++;
+        }
+        if (/^\s*Disallow:\s*\/\s*$/im.test(rb)) {
+            console.log('- robots.txt contains a blanket Disallow: /'); failed++;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
