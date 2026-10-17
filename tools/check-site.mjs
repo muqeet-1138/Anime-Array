@@ -344,6 +344,35 @@ for (const file of pages) {
 }
 console.log(`  no orphaned pages among ${pages.length} indexable pages`);
 
+// Brand assets. These are referenced from every page, so a missing file is a
+// broken header or a missing favicon on the whole site.
+const REQUIRED_ASSETS = [
+    ['logo-128.png', 'the header mark'],
+    ['logo-256.png', 'the reference-sized logo'],
+    ['logo.png', 'the full logo'],
+    ['favicon-16.png', '16px favicon'],
+    ['favicon-32.png', '32px favicon'],
+    ['favicon.ico', 'multi-size favicon'],
+    ['apple-touch-icon.png', 'iOS home-screen icon']
+];
+for (const [file, why] of REQUIRED_ASSETS) {
+    const p = path.join(DOCS, 'assets', file);
+    if (!fs.existsSync(p)) { console.log(`  - docs/assets/${file} is missing (${why})`); failed++; }
+    else if (fs.statSync(p).size === 0) { console.log(`  - docs/assets/${file} is zero bytes (${why})`); failed++; }
+}
+
+// Every page must reference the same logo and the same four icon files.
+const ICON_FILES = ['favicon.ico', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png'];
+for (const file of files) {
+    const html = fs.readFileSync(path.join(DOCS, file), 'utf8');
+    const marks = (html.match(/<img[^>]+class="mark"/g) || []).length;
+    if (marks !== 1) { console.log(`  - ${file} has ${marks} header marks, expected 1`); failed++; }
+    for (const icon of ICON_FILES) {
+        if (!html.includes(`assets/${icon}`)) { console.log(`  - ${file} does not link ${icon}`); failed++; }
+    }
+}
+console.log(`  ${REQUIRED_ASSETS.length} brand asset(s) present; logo and icons linked on all ${files.length} pages`);
+
 console.log('');
 console.log(failed ? `${failed} problem(s) found` : 'All checks passed');
 process.exit(failed ? 1 : 0);
