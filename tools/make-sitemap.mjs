@@ -1,13 +1,18 @@
+
 #!/usr/bin/env node
+
 /**
- * tools/make-sitemap.mjs
+ * make-sitemap.mjs
  *
- * Generates a Google-compatible sitemap at docs/sitemap.xml.
+ * Generates a Google-compatible XML sitemap for GitHub Pages.
+ *
+ * Output:
+ *   docs/sitemap.xml
  *
  * Run:
  *   node tools/make-sitemap.mjs
  *
- * Optional custom origin:
+ * Optional custom site URL:
  *   node tools/make-sitemap.mjs https://muqeet-1138.github.io/Anime-Array/
  */
 
@@ -21,29 +26,23 @@ const ROOT = path.resolve(
 );
 
 const DOCS = path.join(ROOT, 'docs');
+const OUTPUT = path.join(DOCS, 'sitemap.xml');
 
 const DEFAULT_ORIGIN =
   'https://muqeet-1138.github.io/Anime-Array/';
 
-const rawOrigin = process.argv[2] || DEFAULT_ORIGIN;
-const originUrl = new URL(rawOrigin);
-
-if (originUrl.protocol !== 'https:' || originUrl.search || originUrl.hash) {
-  throw new Error('Origin must be an HTTPS URL without a query or fragment.');
-}
-
-const ORIGIN = originUrl.href.replace(/\/+$/, '');
-const BASE_PATH = originUrl.pathname.replace(/\/+$/, '') || '';
-
-const SITEMAP_FILE = path.join(DOCS, 'sitemap.xml');
-const MAX_URLS = 50_000;
+const MAX_URLS = 50000;
 const MAX_BYTES = 50 * 1024 * 1024;
 
 const excluded = [];
-const candidates = [];
+const included = [];
+const seenUrls = new Set();
 
-// Escape XML values so generated XML remains well-formed.
-function xmlEscape(value) {
+function log(message) {
+  console.log(`[sitemap] ${message}`);
+}
+
+function escapeXml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -52,106 +51,90 @@ function xmlEscape(value) {
     .replace(/'/g, '&apos;');
 }
 
-// Decode common HTML entities in HTML attribute values.
-function decodeEntities(value) {
+function decodeHtmlEntities(value) {
   return value
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&apos;/gi, "'")
     .replace(/&#39;/gi, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
-      String.fromCodePoint(parseInt(n, 16))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
+      String.fromCodePoint(parseInt(hex, 16))
     )
-    .replace(/&#([0-9]+);/g, (_, n) =>
-      String.fromCodePoint(parseInt(n, 10))
+    .replace(/&#([0-9]+);/g, (_, dec) =>
+      String.fromCodePoint(parseInt(dec, 10))
     );
 }
 
-function isStub(file) {
-  return /^google[0-9a-f]+\.html$/i.test(file) ||
-    /verification/i.test(file);
+function getAttribute(tag, attribute) {
+  const pattern = new RegExp(
+    `(?:^|\\s)${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    'i'
+  );
+
+  const match = tag.match(pattern);
+
+  return match
+    ? (match[1] ?? match[2] ?? match[3] ?? '')
+    : null;
 }
 
-function isNoindex(html) {
-  // Handles name/content attributes in either order.
-  const tags = html.match(/<meta\b[^>]*>/gi) || [];
+function isVerificationFile(filename) {
+  return (
+    /^google[0-9a-f]+\.html$/i.test(filename) ||
+    /verification/i.test(filename)
+  );
+}
 
-  return tags.some((tag) => {
-    const name = tag.match(/\bname\s*=\s*["']([^"']+)["']/i)?.[1];
-    const content = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+function hasNoindex(html) {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) || [];
 
-    return name?.toLowerCase() === 'robots' &&
-      /(?:^|[\s,])noindex(?:$|[\s,])/i.test(content || '');
+  return metaTags.some((tag) => {
+    const name = getAttribute(tag, 'name');
+    const content = getAttribute(tag, 'content');
+
+    return (
+      name?.toLowerCase() === 'robots' &&
+      /(?:^|[\s,])noindex(?:$|[\s,])/i.test(content || '')
+    );
   });
 }
 
-function canonicalOf(html) {
-  const links = html.match(/<link\b[^>]*>/gi) || [];
+function getCanonical(html) {
+  const linkTags = html.match(/<link\b[^>]*>/gi) || [];
 
-  for (const tag of links) {
-    const rel = tag.match(/\brel\s*=\s*["']([^"']+)["']/i)?.[1];
-    const href = tag.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+  for (const tag of linkTags) {
+    const rel = getAttribute(tag, 'rel');
+    const href = getAttribute(tag, 'href');
 
     if (
-      rel?.toLowerCase().split(/\s+/).includes('canonical') &&
+      rel &&
+      rel.toLowerCase().split(/\s+/).includes('canonical') &&
       href
     ) {
-      return decodeEntities(href.trim());
+      return decodeHtmlEntities(href.trim());
     }
   }
 
   return null;
 }
 
-function normalizeCanonical(raw, file) {
-  let url;
+function collectHtmlFiles(directory, relative = '') {
+  const entries = fs.readdirSync(directory, {
+    withFileTypes: true,
+  });
 
-  try {
-    url = new URL(raw, ORIGIN + '/');
-  } catch {
-    excluded.push(`${file} (invalid canonical URL)`);
-    return null;
-  }
-
-  if (url.protocol !== 'https:') {
-    excluded.push(`${file} (canonical must use HTTPS)`);
-    return null;
-  }
-
-  if (url.origin !== originUrl.origin) {
-    excluded.push(`${file} (canonical points to another origin)`);
-    return null;
-  }
-
-  if (url.username || url.password || url.search || url.hash) {
-    excluded.push(`${file} (canonical contains credentials, query or fragment)`);
-    return null;
-  }
-
-  if (BASE_PATH && url.pathname !== BASE_PATH &&
-      !url.pathname.startsWith(BASE_PATH + '/')) {
-    excluded.push(`${file} (canonical is outside the GitHub Pages project path)`);
-    return null;
-  }
-
-  // Reject URLs containing whitespace or malformed percent escapes.
-  if (/\s/.test(url.href) || /%(?![0-9a-f]{2})/i.test(url.href)) {
-    excluded.push(`${file} (malformed canonical URL)`);
-    return null;
-  }
-
-  return url.href;
-}
-
-function walk(directory, relative = '') {
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    const fullPath = path.join(directory, entry.name);
-    const relPath = path.posix.join(relative, entry.name);
+  for (const entry of entries) {
+    const absolutePath = path.join(directory, entry.name);
+    const relativePath = path.posix.join(relative, entry.name);
 
     if (entry.isDirectory()) {
-      if (entry.name !== '.git' && entry.name !== 'node_modules') {
-        walk(fullPath, relPath);
+      if (
+        entry.name !== '.git' &&
+        entry.name !== 'node_modules'
+      ) {
+        collectHtmlFiles(absolutePath, relativePath);
       }
+
       continue;
     }
 
@@ -159,76 +142,139 @@ function walk(directory, relative = '') {
       continue;
     }
 
-    if (isStub(entry.name) || entry.name.toLowerCase() === '404.html') {
-      excluded.push(`${relPath} (verification stub or 404 page)`);
+    if (
+      entry.name.toLowerCase() === '404.html' ||
+      isVerificationFile(entry.name)
+    ) {
+      excluded.push(`${relativePath}: excluded page`);
       continue;
     }
 
-    candidates.push({ file: relPath, fullPath });
+    processHtmlFile(absolutePath, relativePath);
   }
 }
+
+function processHtmlFile(absolutePath, relativePath) {
+  const html = fs.readFileSync(absolutePath, 'utf8');
+
+  if (hasNoindex(html)) {
+    excluded.push(`${relativePath}: noindex`);
+    return;
+  }
+
+  const canonical = getCanonical(html);
+
+  if (!canonical) {
+    excluded.push(`${relativePath}: missing canonical link`);
+    return;
+  }
+
+  let url;
+
+  try {
+    url = new URL(canonical);
+  } catch {
+    excluded.push(`${relativePath}: invalid canonical URL`);
+    return;
+  }
+
+  if (url.protocol !== 'https:') {
+    excluded.push(`${relativePath}: canonical must use HTTPS`);
+    return;
+  }
+
+  if (url.origin !== SITE.origin) {
+    excluded.push(`${relativePath}: canonical uses another origin`);
+    return;
+  }
+
+  if (url.username || url.password || url.search || url.hash) {
+    excluded.push(`${relativePath}: invalid canonical URL components`);
+    return;
+  }
+
+  // GitHub Pages project sites must retain their repository path.
+  if (
+    SITE_BASE_PATH &&
+    url.pathname !== SITE_BASE_PATH &&
+    !url.pathname.startsWith(SITE_BASE_PATH + '/')
+  ) {
+    excluded.push(`${relativePath}: URL is outside the project path`);
+    return;
+  }
+
+  if (/\s/.test(url.href)) {
+    excluded.push(`${relativePath}: URL contains whitespace`);
+    return;
+  }
+
+  if (seenUrls.has(url.href)) {
+    excluded.push(`${relativePath}: duplicate canonical URL`);
+    return;
+  }
+
+  seenUrls.add(url.href);
+
+  const stat = fs.statSync(absolutePath);
+
+  included.push({
+    file: relativePath,
+    url: url.href,
+    lastmod: stat.mtime.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  });
+}
+
+// Resolve and validate the configured site URL.
+const rawOrigin = process.argv[2] || DEFAULT_ORIGIN;
+let SITE;
+
+try {
+  SITE = new URL(rawOrigin);
+} catch {
+  throw new Error(`Invalid site URL: ${rawOrigin}`);
+}
+
+if (
+  SITE.protocol !== 'https:' ||
+  SITE.username ||
+  SITE.password ||
+  SITE.search ||
+  SITE.hash
+) {
+  throw new Error(
+    'The site URL must be HTTPS and must not contain credentials, a query, or a fragment.'
+  );
+}
+
+SITE.pathname = SITE.pathname.replace(/\/+$/, '') + '/';
+
+const SITE_BASE_PATH =
+  SITE.pathname.replace(/\/+$/, '');
 
 if (!fs.existsSync(DOCS)) {
   throw new Error(`Docs directory not found: ${DOCS}`);
 }
 
-walk(DOCS);
+// Read pages from docs/ and all its subdirectories.
+collectHtmlFiles(DOCS);
 
-const seen = new Set();
-const included = [];
-
-for (const { file, fullPath } of candidates) {
-  const html = fs.readFileSync(fullPath, 'utf8');
-
-  if (isNoindex(html)) {
-    excluded.push(`${file} (noindex)`);
-    continue;
-  }
-
-  const rawCanonical = canonicalOf(html);
-
-  if (!rawCanonical) {
-    excluded.push(`${file} (missing canonical link)`);
-    continue;
-  }
-
-  const url = normalizeCanonical(rawCanonical, file);
-
-  if (!url) continue;
-
-  if (seen.has(url)) {
-    excluded.push(`${file} (duplicate canonical URL: ${url})`);
-    continue;
-  }
-
-  seen.add(url);
-
-  included.push({
-    file,
-    url,
-    // File timestamps are only a proxy for significant content updates.
-    lastmod: new Date(fs.statSync(fullPath).mtime)
-      .toISOString()
-      .replace(/\.\d{3}Z$/, 'Z'),
-  });
-}
-
-// Put the project homepage first, followed by stable alphabetical order.
-const homeUrl = ORIGIN + '/';
+// Homepage first; then alphabetical order.
+const HOME_URL = SITE.origin + SITE_BASE_PATH + '/';
 
 included.sort((a, b) => {
-  if (a.url === homeUrl) return -1;
-  if (b.url === homeUrl) return 1;
+  if (a.url === HOME_URL) return -1;
+  if (b.url === HOME_URL) return 1;
+
   return a.url.localeCompare(b.url);
 });
 
 if (included.length > MAX_URLS) {
   throw new Error(
-    `Found ${included.length} URLs; a sitemap supports at most ${MAX_URLS}. ` +
-    'Generate a sitemap index and split the URLs into multiple sitemap files.'
+    `Found ${included.length} URLs. A sitemap can contain at most ${MAX_URLS} URLs.`
   );
 }
 
+// Generate standard sitemap XML. No stylesheet is required.
 const lines = [
   '<?xml version="1.0" encoding="UTF-8"?>',
   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
@@ -236,33 +282,38 @@ const lines = [
 
 for (const entry of included) {
   lines.push('  <url>');
-  lines.push(`    <loc>${xmlEscape(entry.url)}</loc>`);
+  lines.push(`    <loc>${escapeXml(entry.url)}</loc>`);
   lines.push(`    <lastmod>${entry.lastmod}</lastmod>`);
   lines.push('  </url>');
 }
 
 lines.push('</urlset>', '');
 
-const output = lines.join('\n');
-const bytes = Buffer.byteLength(output, 'utf8');
+const xml = lines.join('\n');
+const size = Buffer.byteLength(xml, 'utf8');
 
-if (bytes > MAX_BYTES) {
-  throw new Error('Sitemap exceeds the 50 MB uncompressed size limit.');
+if (size > MAX_BYTES) {
+  throw new Error(
+    'Sitemap exceeds the 50 MB uncompressed size limit.'
+  );
 }
 
-fs.writeFileSync(SITEMAP_FILE, output, 'utf8');
+// Save the completed sitemap.
+fs.writeFileSync(OUTPUT, xml, 'utf8');
 
-console.log(`Sitemap written: ${SITEMAP_FILE}`);
-console.log(`Included: ${included.length} URL(s)`);
+log(`Generated: ${OUTPUT}`);
+log(`Site: ${SITE.origin}${SITE_BASE_PATH}/`);
+log(`Included URLs: ${included.length}`);
+log(`File size: ${size} bytes`);
 
 for (const entry of included) {
-  console.log(`  ${entry.lastmod}  ${entry.url}`);
+  log(`  ${entry.url}`);
 }
 
-if (excluded.length) {
-  console.log(`\nExcluded: ${excluded.length}`);
+if (excluded.length > 0) {
+  log(`Excluded pages: ${excluded.length}`);
 
   for (const item of excluded) {
-    console.log(`  ${item}`);
+    log(`  ${item}`);
   }
 }
