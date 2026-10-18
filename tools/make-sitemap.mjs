@@ -4,15 +4,6 @@
 /**
  * Anime Array XML Sitemap Generator
  *
- * Features:
- * - WordPress-style XML sitemap
- * - Browser table styling using sitemap.xsl
- * - Automatic HTML page discovery
- * - Canonical URL support
- * - Priority, changefreq and lastmod
- * - Excludes noindex pages, 404 pages and verification files
- * - Removes duplicate URLs
- *
  * Run from repository root:
  *   node tools/make-sitemap.mjs
  */
