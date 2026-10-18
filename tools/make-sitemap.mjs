@@ -2,18 +2,19 @@
 #!/usr/bin/env node
 
 /**
- * make-sitemap.mjs
+ * Anime Array XML Sitemap Generator
  *
- * Generates a Google-compatible XML sitemap for GitHub Pages.
+ * Features:
+ * - WordPress-style XML sitemap
+ * - Browser table styling using sitemap.xsl
+ * - Automatic HTML page discovery
+ * - Canonical URL support
+ * - Priority, changefreq and lastmod
+ * - Excludes noindex pages, 404 pages and verification files
+ * - Removes duplicate URLs
  *
- * Output:
- *   docs/sitemap.xml
- *
- * Run:
+ * Run from repository root:
  *   node tools/make-sitemap.mjs
- *
- * Optional custom site URL:
- *   node tools/make-sitemap.mjs https://muqeet-1138.github.io/Anime-Array/
  */
 
 import fs from 'node:fs';
@@ -28,19 +29,42 @@ const ROOT = path.resolve(
 const DOCS = path.join(ROOT, 'docs');
 const OUTPUT = path.join(DOCS, 'sitemap.xml');
 
-const DEFAULT_ORIGIN =
+// Change this if your site uses a custom domain.
+const SITE_URL =
+  process.argv[2] ||
   'https://muqeet-1138.github.io/Anime-Array/';
+
+// Configure the sitemap display metadata.
+const DEFAULT_PRIORITY = '1.0';
+const DEFAULT_CHANGEFREQ = 'daily';
+
+const EXCLUDED_FILES = new Set([
+  '404.html',
+]);
 
 const MAX_URLS = 50000;
 const MAX_BYTES = 50 * 1024 * 1024;
 
-const excluded = [];
-const included = [];
-const seenUrls = new Set();
+const site = new URL(SITE_URL);
 
-function log(message) {
-  console.log(`[sitemap] ${message}`);
+if (
+  site.protocol !== 'https:' ||
+  site.username ||
+  site.password ||
+  site.search ||
+  site.hash
+) {
+  throw new Error(
+    'SITE_URL must be a valid HTTPS URL without credentials, query or fragment.'
+  );
 }
+
+site.pathname = site.pathname.replace(/\/+$/, '') + '/';
+
+const siteBasePath = site.pathname.replace(/\/+$/, '');
+const included = [];
+const excluded = [];
+const seen = new Set();
 
 function escapeXml(value) {
   return String(value)
@@ -66,15 +90,15 @@ function decodeHtmlEntities(value) {
 }
 
 function getAttribute(tag, attribute) {
-  const pattern = new RegExp(
+  const regex = new RegExp(
     `(?:^|\\s)${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
     'i'
   );
 
-  const match = tag.match(pattern);
+  const match = tag.match(regex);
 
   return match
-    ? (match[1] ?? match[2] ?? match[3] ?? '')
+    ? match[1] ?? match[2] ?? match[3] ?? ''
     : null;
 }
 
@@ -86,9 +110,9 @@ function isVerificationFile(filename) {
 }
 
 function hasNoindex(html) {
-  const metaTags = html.match(/<meta\b[^>]*>/gi) || [];
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
 
-  return metaTags.some((tag) => {
+  return tags.some((tag) => {
     const name = getAttribute(tag, 'name');
     const content = getAttribute(tag, 'content');
 
@@ -100,9 +124,9 @@ function hasNoindex(html) {
 }
 
 function getCanonical(html) {
-  const linkTags = html.match(/<link\b[^>]*>/gi) || [];
+  const tags = html.match(/<link\b[^>]*>/gi) || [];
 
-  for (const tag of linkTags) {
+  for (const tag of tags) {
     const rel = getAttribute(tag, 'rel');
     const href = getAttribute(tag, 'href');
 
@@ -118,7 +142,7 @@ function getCanonical(html) {
   return null;
 }
 
-function collectHtmlFiles(directory, relative = '') {
+function collectPages(directory, relative = '') {
   const entries = fs.readdirSync(directory, {
     withFileTypes: true,
   });
@@ -129,32 +153,34 @@ function collectHtmlFiles(directory, relative = '') {
 
     if (entry.isDirectory()) {
       if (
-        entry.name !== '.git' &&
-        entry.name !== 'node_modules'
+        !['.git', 'node_modules'].includes(entry.name)
       ) {
-        collectHtmlFiles(absolutePath, relativePath);
+        collectPages(absolutePath, relativePath);
       }
 
       continue;
     }
 
-    if (!entry.isFile() || !/\.html?$/i.test(entry.name)) {
+    if (
+      !entry.isFile() ||
+      !/\.html?$/i.test(entry.name)
+    ) {
       continue;
     }
 
     if (
-      entry.name.toLowerCase() === '404.html' ||
+      EXCLUDED_FILES.has(entry.name.toLowerCase()) ||
       isVerificationFile(entry.name)
     ) {
-      excluded.push(`${relativePath}: excluded page`);
+      excluded.push(`${relativePath}: excluded file`);
       continue;
     }
 
-    processHtmlFile(absolutePath, relativePath);
+    processPage(absolutePath, relativePath);
   }
 }
 
-function processHtmlFile(absolutePath, relativePath) {
+function processPage(absolutePath, relativePath) {
   const html = fs.readFileSync(absolutePath, 'utf8');
 
   if (hasNoindex(html)) {
@@ -165,7 +191,7 @@ function processHtmlFile(absolutePath, relativePath) {
   const canonical = getCanonical(html);
 
   if (!canonical) {
-    excluded.push(`${relativePath}: missing canonical link`);
+    excluded.push(`${relativePath}: missing canonical`);
     return;
   }
 
@@ -178,28 +204,24 @@ function processHtmlFile(absolutePath, relativePath) {
     return;
   }
 
-  if (url.protocol !== 'https:') {
-    excluded.push(`${relativePath}: canonical must use HTTPS`);
-    return;
-  }
-
-  if (url.origin !== SITE.origin) {
-    excluded.push(`${relativePath}: canonical uses another origin`);
-    return;
-  }
-
-  if (url.username || url.password || url.search || url.hash) {
-    excluded.push(`${relativePath}: invalid canonical URL components`);
-    return;
-  }
-
-  // GitHub Pages project sites must retain their repository path.
   if (
-    SITE_BASE_PATH &&
-    url.pathname !== SITE_BASE_PATH &&
-    !url.pathname.startsWith(SITE_BASE_PATH + '/')
+    url.protocol !== 'https:' ||
+    url.origin !== site.origin ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
   ) {
-    excluded.push(`${relativePath}: URL is outside the project path`);
+    excluded.push(`${relativePath}: invalid canonical URL`);
+    return;
+  }
+
+  if (
+    siteBasePath &&
+    url.pathname !== siteBasePath &&
+    !url.pathname.startsWith(siteBasePath + '/')
+  ) {
+    excluded.push(`${relativePath}: outside site base path`);
     return;
   }
 
@@ -208,81 +230,62 @@ function processHtmlFile(absolutePath, relativePath) {
     return;
   }
 
-  if (seenUrls.has(url.href)) {
+  if (seen.has(url.href)) {
     excluded.push(`${relativePath}: duplicate canonical URL`);
     return;
   }
 
-  seenUrls.add(url.href);
+  seen.add(url.href);
 
-  const stat = fs.statSync(absolutePath);
+  // ISO 8601 format with an explicit UTC offset.
+  const lastmod = fs.statSync(absolutePath)
+    .mtime
+    .toISOString()
+    .replace(/\.\d{3}Z$/, '+00:00');
 
   included.push({
     file: relativePath,
     url: url.href,
-    lastmod: stat.mtime.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    lastmod,
+    priority: DEFAULT_PRIORITY,
+    changefreq: DEFAULT_CHANGEFREQ,
   });
 }
-
-// Resolve and validate the configured site URL.
-const rawOrigin = process.argv[2] || DEFAULT_ORIGIN;
-let SITE;
-
-try {
-  SITE = new URL(rawOrigin);
-} catch {
-  throw new Error(`Invalid site URL: ${rawOrigin}`);
-}
-
-if (
-  SITE.protocol !== 'https:' ||
-  SITE.username ||
-  SITE.password ||
-  SITE.search ||
-  SITE.hash
-) {
-  throw new Error(
-    'The site URL must be HTTPS and must not contain credentials, a query, or a fragment.'
-  );
-}
-
-SITE.pathname = SITE.pathname.replace(/\/+$/, '') + '/';
-
-const SITE_BASE_PATH =
-  SITE.pathname.replace(/\/+$/, '');
 
 if (!fs.existsSync(DOCS)) {
   throw new Error(`Docs directory not found: ${DOCS}`);
 }
 
-// Read pages from docs/ and all its subdirectories.
-collectHtmlFiles(DOCS);
+collectPages(DOCS);
 
-// Homepage first; then alphabetical order.
-const HOME_URL = SITE.origin + SITE_BASE_PATH + '/';
+// Homepage first, then alphabetical.
+const homepage = new URL(siteBasePath + '/', site.origin).href;
 
 included.sort((a, b) => {
-  if (a.url === HOME_URL) return -1;
-  if (b.url === HOME_URL) return 1;
-
+  if (a.url === homepage) return -1;
+  if (b.url === homepage) return 1;
   return a.url.localeCompare(b.url);
 });
 
 if (included.length > MAX_URLS) {
   throw new Error(
-    `Found ${included.length} URLs. A sitemap can contain at most ${MAX_URLS} URLs.`
+    'Sitemap exceeds 50,000 URLs. Generate a sitemap index.'
   );
 }
 
-// Generate standard sitemap XML. No stylesheet is required.
+// Generate XML with a stylesheet reference.
+// The XSL file must be deployed beside sitemap.xml.
 const lines = [
   '<?xml version="1.0" encoding="UTF-8"?>',
+  '<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>',
   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
 ];
 
 for (const entry of included) {
   lines.push('  <url>');
   lines.push(`    <loc>${escapeXml(entry.url)}</loc>`);
+  lines.push(`    <priority>${entry.priority}</priority>`);
+  lines.push(`    <changefreq>${entry.changefreq}</changefreq>`);
   lines.push(`    <lastmod>${entry.lastmod}</lastmod>`);
   lines.push('  </url>');
 }
@@ -290,30 +293,27 @@ for (const entry of included) {
 lines.push('</urlset>', '');
 
 const xml = lines.join('\n');
-const size = Buffer.byteLength(xml, 'utf8');
+const bytes = Buffer.byteLength(xml, 'utf8');
 
-if (size > MAX_BYTES) {
-  throw new Error(
-    'Sitemap exceeds the 50 MB uncompressed size limit.'
-  );
+if (bytes > MAX_BYTES) {
+  throw new Error('Sitemap exceeds the 50 MB size limit.');
 }
 
-// Save the completed sitemap.
 fs.writeFileSync(OUTPUT, xml, 'utf8');
 
-log(`Generated: ${OUTPUT}`);
-log(`Site: ${SITE.origin}${SITE_BASE_PATH}/`);
-log(`Included URLs: ${included.length}`);
-log(`File size: ${size} bytes`);
+console.log('\nXML Sitemap generated successfully!');
+console.log(`URL: ${site.href}`);
+console.log(`Included pages: ${included.length}`);
+console.log(`Output: ${OUTPUT}`);
 
 for (const entry of included) {
-  log(`  ${entry.url}`);
+  console.log(`  ${entry.url}`);
 }
 
-if (excluded.length > 0) {
-  log(`Excluded pages: ${excluded.length}`);
+if (excluded.length) {
+  console.log(`\nExcluded pages: ${excluded.length}`);
 
   for (const item of excluded) {
-    log(`  ${item}`);
+    console.log(`  ${item}`);
   }
 }
