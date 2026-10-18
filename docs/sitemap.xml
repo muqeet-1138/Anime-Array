@@ -3,30 +3,44 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/about.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/characters.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/faq.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/policies.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/products.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
   <url>
     <loc>https://muqeet-1138.github.io/Anime-Array/technology.html</loc>
-    <lastmod>2026-10-17</lastmod>
+    <priority>1.0</priority>
+    <changefreq>daily</changefreq>
+    <lastmod>2026-10-17T21:03:25+00:00</lastmod>
   </url>
 </urlset>
