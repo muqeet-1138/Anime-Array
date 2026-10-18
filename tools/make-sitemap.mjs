@@ -1,22 +1,6 @@
 
 #!/usr/bin/env node
 
-/**
- * Anime Array XML Sitemap Generator
- *
- * Features:
- * - WordPress-style XML sitemap
- * - Browser table styling using sitemap.xsl
- * - Automatic HTML page discovery
- * - Canonical URL support
- * - Priority, changefreq and lastmod
- * - Excludes noindex pages, 404 pages and verification files
- * - Removes duplicate URLs
- *
- * Run from repository root:
- *   node tools/make-sitemap.mjs
- */
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,19 +13,12 @@ const ROOT = path.resolve(
 const DOCS = path.join(ROOT, 'docs');
 const OUTPUT = path.join(DOCS, 'sitemap.xml');
 
-// Change this if your site uses a custom domain.
 const SITE_URL =
   process.argv[2] ||
   'https://muqeet-1138.github.io/Anime-Array/';
 
-// Configure the sitemap display metadata.
-const DEFAULT_PRIORITY = '1.0';
-const DEFAULT_CHANGEFREQ = 'daily';
-
-const EXCLUDED_FILES = new Set([
-  '404.html',
-]);
-
+const PRIORITY = '1.0';
+const CHANGEFREQ = 'daily';
 const MAX_URLS = 50000;
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -54,14 +31,14 @@ if (
   site.search ||
   site.hash
 ) {
-  throw new Error(
-    'SITE_URL must be a valid HTTPS URL without credentials, query or fragment.'
-  );
+  throw new Error('SITE_URL must be a valid HTTPS URL.');
 }
 
 site.pathname = site.pathname.replace(/\/+$/, '') + '/';
 
-const siteBasePath = site.pathname.replace(/\/+$/, '');
+const BASE_PATH = site.pathname.replace(/\/+$/, '');
+const ORIGIN = site.origin;
+
 const included = [];
 const excluded = [];
 const seen = new Set();
@@ -75,23 +52,23 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;');
 }
 
-function decodeHtmlEntities(value) {
+function decodeEntities(value) {
   return value
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&apos;/gi, "'")
     .replace(/&#39;/gi, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) =>
-      String.fromCodePoint(parseInt(hex, 16))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
+      String.fromCodePoint(parseInt(n, 16))
     )
-    .replace(/&#([0-9]+);/g, (_, dec) =>
-      String.fromCodePoint(parseInt(dec, 10))
+    .replace(/&#([0-9]+);/g, (_, n) =>
+      String.fromCodePoint(parseInt(n, 10))
     );
 }
 
-function getAttribute(tag, attribute) {
+function getAttribute(tag, name) {
   const regex = new RegExp(
-    `(?:^|\\s)${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    `(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
     'i'
   );
 
@@ -135,53 +112,25 @@ function getCanonical(html) {
       rel.toLowerCase().split(/\s+/).includes('canonical') &&
       href
     ) {
-      return decodeHtmlEntities(href.trim());
+      return decodeEntities(href.trim());
     }
   }
 
   return null;
 }
 
-function collectPages(directory, relative = '') {
-  const entries = fs.readdirSync(directory, {
-    withFileTypes: true,
-  });
+function processPage(fullPath, relativePath) {
+  const filename = path.basename(fullPath);
 
-  for (const entry of entries) {
-    const absolutePath = path.join(directory, entry.name);
-    const relativePath = path.posix.join(relative, entry.name);
-
-    if (entry.isDirectory()) {
-      if (
-        !['.git', 'node_modules'].includes(entry.name)
-      ) {
-        collectPages(absolutePath, relativePath);
-      }
-
-      continue;
-    }
-
-    if (
-      !entry.isFile() ||
-      !/\.html?$/i.test(entry.name)
-    ) {
-      continue;
-    }
-
-    if (
-      EXCLUDED_FILES.has(entry.name.toLowerCase()) ||
-      isVerificationFile(entry.name)
-    ) {
-      excluded.push(`${relativePath}: excluded file`);
-      continue;
-    }
-
-    processPage(absolutePath, relativePath);
+  if (
+    filename.toLowerCase() === '404.html' ||
+    isVerificationFile(filename)
+  ) {
+    excluded.push(`${relativePath}: excluded file`);
+    return;
   }
-}
 
-function processPage(absolutePath, relativePath) {
-  const html = fs.readFileSync(absolutePath, 'utf8');
+  const html = fs.readFileSync(fullPath, 'utf8');
 
   if (hasNoindex(html)) {
     excluded.push(`${relativePath}: noindex`);
@@ -191,7 +140,7 @@ function processPage(absolutePath, relativePath) {
   const canonical = getCanonical(html);
 
   if (!canonical) {
-    excluded.push(`${relativePath}: missing canonical`);
+    excluded.push(`${relativePath}: missing canonical link`);
     return;
   }
 
@@ -206,7 +155,7 @@ function processPage(absolutePath, relativePath) {
 
   if (
     url.protocol !== 'https:' ||
-    url.origin !== site.origin ||
+    url.origin !== ORIGIN ||
     url.username ||
     url.password ||
     url.search ||
@@ -217,16 +166,16 @@ function processPage(absolutePath, relativePath) {
   }
 
   if (
-    siteBasePath &&
-    url.pathname !== siteBasePath &&
-    !url.pathname.startsWith(siteBasePath + '/')
+    BASE_PATH &&
+    url.pathname !== BASE_PATH &&
+    !url.pathname.startsWith(BASE_PATH + '/')
   ) {
     excluded.push(`${relativePath}: outside site base path`);
     return;
   }
 
   if (/\s/.test(url.href)) {
-    excluded.push(`${relativePath}: URL contains whitespace`);
+    excluded.push(`${relativePath}: whitespace in URL`);
     return;
   }
 
@@ -237,8 +186,7 @@ function processPage(absolutePath, relativePath) {
 
   seen.add(url.href);
 
-  // ISO 8601 format with an explicit UTC offset.
-  const lastmod = fs.statSync(absolutePath)
+  const lastmod = fs.statSync(fullPath)
     .mtime
     .toISOString()
     .replace(/\.\d{3}Z$/, '+00:00');
@@ -247,34 +195,55 @@ function processPage(absolutePath, relativePath) {
     file: relativePath,
     url: url.href,
     lastmod,
-    priority: DEFAULT_PRIORITY,
-    changefreq: DEFAULT_CHANGEFREQ,
   });
 }
 
-if (!fs.existsSync(DOCS)) {
-  throw new Error(`Docs directory not found: ${DOCS}`);
+function scanDirectory(directory, relative = '') {
+  for (const entry of fs.readdirSync(directory, {
+    withFileTypes: true,
+  })) {
+    const fullPath = path.join(directory, entry.name);
+    const relativePath = path.posix.join(relative, entry.name);
+
+    if (entry.isDirectory()) {
+      if (
+        entry.name !== '.git' &&
+        entry.name !== 'node_modules'
+      ) {
+        scanDirectory(fullPath, relativePath);
+      }
+
+      continue;
+    }
+
+    if (
+      entry.isFile() &&
+      /\.html?$/i.test(entry.name)
+    ) {
+      processPage(fullPath, relativePath);
+    }
+  }
 }
 
-collectPages(DOCS);
+if (!fs.existsSync(DOCS)) {
+  throw new Error(`Directory not found: ${DOCS}`);
+}
 
-// Homepage first, then alphabetical.
-const homepage = new URL(siteBasePath + '/', site.origin).href;
+scanDirectory(DOCS);
+
+const HOME_URL = `${ORIGIN}${BASE_PATH}/`;
 
 included.sort((a, b) => {
-  if (a.url === homepage) return -1;
-  if (b.url === homepage) return 1;
+  if (a.url === HOME_URL) return -1;
+  if (b.url === HOME_URL) return 1;
+
   return a.url.localeCompare(b.url);
 });
 
 if (included.length > MAX_URLS) {
-  throw new Error(
-    'Sitemap exceeds 50,000 URLs. Generate a sitemap index.'
-  );
+  throw new Error('Sitemap exceeds the 50,000 URL limit.');
 }
 
-// Generate XML with a stylesheet reference.
-// The XSL file must be deployed beside sitemap.xml.
 const lines = [
   '<?xml version="1.0" encoding="UTF-8"?>',
   '<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>',
@@ -284,8 +253,8 @@ const lines = [
 for (const entry of included) {
   lines.push('  <url>');
   lines.push(`    <loc>${escapeXml(entry.url)}</loc>`);
-  lines.push(`    <priority>${entry.priority}</priority>`);
-  lines.push(`    <changefreq>${entry.changefreq}</changefreq>`);
+  lines.push(`    <priority>${PRIORITY}</priority>`);
+  lines.push(`    <changefreq>${CHANGEFREQ}</changefreq>`);
   lines.push(`    <lastmod>${entry.lastmod}</lastmod>`);
   lines.push('  </url>');
 }
@@ -293,17 +262,21 @@ for (const entry of included) {
 lines.push('</urlset>', '');
 
 const xml = lines.join('\n');
-const bytes = Buffer.byteLength(xml, 'utf8');
+const size = Buffer.byteLength(xml, 'utf8');
 
-if (bytes > MAX_BYTES) {
+if (size > MAX_BYTES) {
   throw new Error('Sitemap exceeds the 50 MB size limit.');
 }
 
-fs.writeFileSync(OUTPUT, xml, 'utf8');
+// Write clean UTF-8 XML with no BOM or leading whitespace.
+fs.writeFileSync(OUTPUT, xml, {
+  encoding: 'utf8',
+  flag: 'w',
+});
 
-console.log('\nXML Sitemap generated successfully!');
-console.log(`URL: ${site.href}`);
-console.log(`Included pages: ${included.length}`);
+console.log('\nSitemap generated successfully!');
+console.log(`Site: ${SITE_URL}`);
+console.log(`URLs included: ${included.length}`);
 console.log(`Output: ${OUTPUT}`);
 
 for (const entry of included) {
@@ -311,7 +284,7 @@ for (const entry of included) {
 }
 
 if (excluded.length) {
-  console.log(`\nExcluded pages: ${excluded.length}`);
+  console.log(`\nExcluded: ${excluded.length}`);
 
   for (const item of excluded) {
     console.log(`  ${item}`);
