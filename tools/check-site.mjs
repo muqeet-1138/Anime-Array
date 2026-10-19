@@ -218,13 +218,46 @@ if (!fs.existsSync(sitemapPath)) {
     console.log('- docs/sitemap.xml is missing');
     failed++;
 } else {
-    const raw = fs.readFileSync(sitemapPath, 'utf8');
-    const text = raw.replace(/^﻿/, '');
+    const bytes = fs.readFileSync(sitemapPath);
 
-    if (raw.charCodeAt(0) === 0xFEFF) { console.log('- sitemap.xml starts with a UTF-8 BOM, which breaks strict parsers'); failed++; }
+    // -----------------------------------------------------------------------
+    // Encoding and the XML declaration. This is the failure that actually
+    // happens: the file gets edited by hand, gains a blank first line or a
+    // byte-order mark, and every browser and crawler reports "XML declaration
+    // allowed only at the start of the document". The declaration must be the
+    // literal first characters of the file, not merely present somewhere.
+    // -----------------------------------------------------------------------
 
-    if (!/^<\?xml\s+version="1\.0"\s+encoding="UTF-8"\?>/.test(text.trim())) {
-        console.log('- sitemap.xml has no XML declaration'); failed++;
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+        console.log('- sitemap.xml is UTF-16 LE. It must be UTF-8 without a BOM.'); failed++;
+    } else if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+        console.log('- sitemap.xml is UTF-16 BE. It must be UTF-8 without a BOM.'); failed++;
+    } else if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+        console.log('- sitemap.xml starts with a UTF-8 BOM, which some parsers reject before the declaration'); failed++;
+    }
+
+    if (bytes.subarray(0, 400).includes(0)) {
+        console.log('- sitemap.xml contains NUL bytes, which means it was saved as UTF-16'); failed++;
+    }
+
+    const text = bytes.toString('utf8').replace(/^\uFEFF/, '');
+
+    if (!text.startsWith('<?xml')) {
+        const firstLine = JSON.stringify((text.split('\n')[0] || '').slice(0, 40));
+        if (/^\s+$/.test(text.split('\n')[0] || '') || text[0] === '\n') {
+            console.log(`- sitemap.xml starts with an empty line. The XML declaration must be the first line.`); failed++;
+        } else if (/^\s/.test(text)) {
+            console.log(`- sitemap.xml starts with whitespace. The XML declaration must be the first character.`); failed++;
+        } else {
+            console.log(`- sitemap.xml has no XML declaration on line 1 (line 1 is ${firstLine})`); failed++;
+        }
+    } else if (!/^<\?xml\s+version="1\.0"\s+encoding="UTF-8"\?>/.test(text)) {
+        console.log('- sitemap.xml declaration must be: <?xml version="1.0" encoding="UTF-8"?>'); failed++;
+    }
+
+    const declLine = text.split('\n').findIndex((l) => l.includes('<?xml')) + 1;
+    if (declLine > 1) {
+        console.log(`- the XML declaration is on line ${declLine}; it is only valid on line 1`); failed++;
     }
 
     const ns = (text.match(/xmlns="([^"]+)"/) || [])[1];
@@ -244,13 +277,14 @@ if (!fs.existsSync(sitemapPath)) {
         console.log(`- sitemap.xml urlset open=${openUrlset} close=${closeUrlset}`); failed++;
     }
 
-    // Tags Google honours. changefreq and priority are ignored by Google and
-    // flagged as unmaintained by other tools, so they count as defects here.
-    const ALLOWED = new Set(['urlset', 'url', 'loc', 'lastmod']);
+    // Every tag the sitemap schema defines. changefreq and priority are ignored
+    // by Google, but they are legal and WordPress emits them, so they are
+    // allowed here rather than treated as a defect.
+    const ALLOWED = new Set(['urlset', 'url', 'loc', 'lastmod', 'changefreq', 'priority']);
     const tags = [...text.matchAll(/<([a-zA-Z][a-zA-Z0-9:._-]*)\b[^>]*>/g)].map((m) => m[1]);
     const unknown = [...new Set(tags)].filter((t) => !ALLOWED.has(t));
     if (unknown.length) {
-        console.log(`- sitemap.xml contains ${unknown.join(', ')}; Google ignores these and tools flag them as stale`); failed++;
+        console.log(`- sitemap.xml contains unrecognised tag(s): ${unknown.join(', ')}`); failed++;
     }
 
     const locs = [...text.matchAll(/<loc>([\s\S]*?)<\/loc>/g)].map((m) => m[1].trim());
@@ -264,6 +298,20 @@ if (!fs.existsSync(sitemapPath)) {
         const ok = /^\d{4}-\d{2}-\d{2}$/.test(v) ||
                    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(v);
         if (!ok) { console.log(`- lastmod is neither YYYY-MM-DD nor a W3C datetime: ${v}`); failed++; }
+    }
+
+    const VALID_FREQ = new Set(['always', 'hourly', 'daily', 'weekly', 'monthly', 'yearly', 'never']);
+    for (const m of text.matchAll(/<changefreq>([\s\S]*?)<\/changefreq>/g)) {
+        const v = m[1].trim();
+        if (!VALID_FREQ.has(v)) { console.log(`- changefreq "${v}" is not one of ${[...VALID_FREQ].join(', ')}`); failed++; }
+    }
+
+    for (const m of text.matchAll(/<priority>([\s\S]*?)<\/priority>/g)) {
+        const v = m[1].trim();
+        const n = Number(v);
+        if (!/^\d(\.\d+)?$/.test(v) || Number.isNaN(n) || n < 0 || n > 1) {
+            console.log(`- priority "${v}" is not a number between 0.0 and 1.0`); failed++;
+        }
     }
 
     // A 404 and a verification stub must never be submitted.
