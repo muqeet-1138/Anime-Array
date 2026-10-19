@@ -260,6 +260,37 @@ if (!fs.existsSync(sitemapPath)) {
         console.log(`- the XML declaration is on line ${declLine}; it is only valid on line 1`); failed++;
     }
 
+    // The stylesheet instruction is what makes a browser show a table rather
+    // than raw XML. Crawlers ignore it, but without it the sitemap looks broken
+    // to a human who opens it, which is how it gets reported as unreadable.
+    const stylesheet = text.match(/<\?xml-stylesheet\s+type="text\/xsl"\s+href="([^"]+)"\s*\?>/);
+    if (!stylesheet) {
+        console.log('- sitemap.xml has no xml-stylesheet instruction, so browsers display raw XML'); failed++;
+    } else {
+        const href = stylesheet[1];
+        const xslPath = path.join(DOCS, href);
+        if (!fs.existsSync(xslPath)) {
+            console.log(`- the stylesheet ${href} does not exist in docs/`); failed++;
+        } else {
+            const xsl = fs.readFileSync(xslPath, 'utf8');
+            if (!/<xsl:stylesheet\b/.test(xsl)) { console.log(`- docs/${href} is not an XSL stylesheet`); failed++; }
+            if (!/xmlns:sm="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9"/.test(xsl)) {
+                console.log(`- docs/${href} does not bind the sitemap namespace`); failed++;
+            }
+            if (!/<xsl:output[^>]*method="html"/.test(xsl)) {
+                console.log(`- docs/${href} does not declare html output`); failed++;
+            }
+        }
+    }
+
+    // The instruction must sit after the declaration and before the root
+    // element, or parsers reject the document.
+    const piIndex = text.indexOf('<?xml-stylesheet');
+    const rootIndex = text.search(/<urlset\b/);
+    if (piIndex !== -1 && (piIndex < text.indexOf('?>') || piIndex > rootIndex)) {
+        console.log('- the xml-stylesheet instruction is not between the declaration and <urlset>'); failed++;
+    }
+
     const ns = (text.match(/xmlns="([^"]+)"/) || [])[1];
     if (ns !== 'http://www.sitemaps.org/schemas/sitemap/0.9') {
         console.log(`- sitemap.xml namespace is "${ns}", expected the sitemaps.org 0.9 namespace`); failed++;

@@ -29,6 +29,11 @@ const TYPES = {
     '.mjs': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
     '.xml': 'application/xml; charset=utf-8',
+    // XSLT must be served with an XML MIME type. A browser will refuse to apply
+    // a stylesheet delivered as application/octet-stream, and then the sitemap
+    // falls back to showing raw XML.
+    '.xsl': 'application/xml; charset=utf-8',
+    '.xslt': 'application/xml; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
